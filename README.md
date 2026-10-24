@@ -40,6 +40,9 @@ curl http://<ip-pi>:8080/play
 | `OPUS_PAYLOAD_TYPE` | `123` | Musí sedět s „Opus Payload Type“ v reproduktoru |
 | `OPUS_BITRATE` | `64k` | Datový tok Opusu (mono) |
 | `VOLUME` | `1.0` | Výchozí hlasitost – násobek (`0.3`) nebo decibely (`-10dB`) |
+| `NORMALIZE` | `1` | Normalizace hlasitosti všech souborů (`0` = vypnuto) |
+| `LOUDNESS` | `-16` | Cílová hlasitost normalizace v LUFS |
+| `TRUE_PEAK` | `-1.5` | Maximální špička po normalizaci v dBTP |
 | `LOCAL_ADDR` | – | IP rozhraní, ze kterého multicast posílat (při více sítovkách) |
 | `TTL` | `4` | TTL multicastových paketů |
 | `HTTP_HOST` | `0.0.0.0` | Adresa HTTP serveru |
@@ -96,6 +99,33 @@ Po změně `reproduktor.container`:
 
 ```bash
 cp reproduktor.container ~/.config/containers/systemd/ && systemctl --user daemon-reload && systemctl --user restart reproduktor
+```
+
+## Normalizace
+
+Aby všechny zvuky hrály stejně nahlas, používá se filtr ffmpeg `loudnorm`
+(EBU R128) ve dvou průchodech:
+
+1. Při prvním přehrání se soubor rychle změří (ne v reálném čase, na Pi
+   zabere u krátkého zvuku zlomek sekundy až pár sekund).
+2. Při přehrání se použije přesná lineární korekce na `LOUDNESS` LUFS – zvuk se
+   jen zesílí/zeslabí, bez „pumpování“.
+
+Měření se drží v paměti podle cesty a času změny souboru, takže se dělá jen
+jednou (po restartu služby znovu). Když měření selže, použije se jednoprůchodový
+dynamický `loudnorm`.
+
+Pořadí filtrů je `loudnorm` → `volume`, takže `VOLUME` / `?volume=` pak ztlumí
+už vyrovnaný zvuk.
+
+`LOUDNESS`: `-16` je běžná hlasitost hlášení, `-23` je úroveň TV vysílání (tišší).
+Hodně tichý zvuk se při normalizaci zesílí – pokud hraje celkově moc nahlas,
+stačí snížit `LOUDNESS` nebo `VOLUME`.
+
+Ručně změřit soubor:
+
+```bash
+ffmpeg -hide_banner -nostats -i test.wav -af loudnorm=I=-16:TP=-1.5:LRA=20:print_format=json -f null -
 ```
 
 ## Nastavení reproduktoru GSC3518HS

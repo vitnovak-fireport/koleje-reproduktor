@@ -49,6 +49,13 @@ CONFIG = {
     "OPUS_BITRATE": os.environ.get("OPUS_BITRATE", "64k"),
     # Hlasitost pro ffmpeg filtr volume: nasobek (0.3) nebo decibely (-10dB)
     "VOLUME": os.environ.get("VOLUME", "1.0"),
+    # Normalizace hlasitosti (EBU R128 loudnorm), aby vsechny soubory hraly stejne nahlas.
+    # VOLUME se aplikuje az po normalizaci.
+    "NORMALIZE": os.environ.get("NORMALIZE", "1").lower() in ("1", "true", "yes", "on"),
+    # Cilova hlasitost v LUFS (-16 = bezna hlasitost hlaseni/podcastu, -23 = vysilani TV)
+    "LOUDNESS": float(os.environ.get("LOUDNESS", "-16")),
+    # Maximalni spicka (true peak) v dBTP
+    "TRUE_PEAK": float(os.environ.get("TRUE_PEAK", "-1.5")),
     "FFMPEG": os.environ.get("FFMPEG", "ffmpeg"),
     "HTTP_HOST": os.environ.get("HTTP_HOST", "0.0.0.0"),
     "HTTP_PORT": int(os.environ.get("HTTP_PORT", "8080")),
@@ -85,6 +92,70 @@ VOLUME_RE = re.compile(r"^-?\d+(\.\d+)?(dB)?$")
 def valid_volume(value):
     return bool(VOLUME_RE.match(value))
 
+
+def loudnorm_target():
+    # LRA=20 (maximum starsich ffmpeg): linear=true funguje jen kdyz zmerene LRA
+    # nepresahne cil, jinak loudnorm prepne na dynamicky rezim
+    return f"loudnorm=I={CONFIG['LOUDNESS']}:TP={CONFIG['TRUE_PEAK']}:LRA=20"
+
+
+class Loudness:
+    """
+    Dvoupruchodova normalizace: soubor se nejdriv zmeri (rychle, ne v realnem case)
+    a pri prehravani se pak pouzije presna linearni korekce. Mereni se cachuje
+    podle cesty a casu zmeny souboru, takze se dela jen pri prvnim prehrani.
+    """
+
+    def __init__(self):
+        self._cache = {}
+        self._lock = threading.Lock()
+
+    def filter_for(self, wav):
+        key = (str(wav), wav.stat().st_mtime_ns)
+        with self._lock:
+            measured = self._cache.get(key)
+        if measured is None:
+            try:
+                measured = self._measure(wav)
+            except Exception as e:
+                # Fallback: jednopruchodovy (dynamicky) loudnorm primo pri prehravani
+                log.warning("Mereni hlasitosti %s selhalo (%s), pouziji dynamicky loudnorm", wav.name, e)
+                return loudnorm_target()
+            with self._lock:
+                self._cache[key] = measured
+        return (f"{loudnorm_target()}"
+                f":measured_I={measured['input_i']}"
+                f":measured_TP={measured['input_tp']}"
+                f":measured_LRA={measured['input_lra']}"
+                f":measured_thresh={measured['input_thresh']}"
+                f":offset={measured['target_offset']}"
+                f":linear=true")
+
+    def _measure(self, wav):
+        cmd = [
+            CONFIG["FFMPEG"], "-hide_banner", "-nostats",
+            "-i", str(wav),
+            "-vn", "-af", f"{loudnorm_target()}:print_format=json",
+            "-f", "null", "-",
+        ]
+        result = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True,
+                                text=True, timeout=120)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg kod {result.returncode}")
+        # loudnorm vypise JSON na konec stderr
+        stderr = result.stderr
+        start = stderr.rfind("{")
+        end = stderr.rfind("}")
+        if start == -1 or end < start:
+            raise RuntimeError("ve vystupu ffmpeg chybi JSON")
+        measured = json.loads(stderr[start:end + 1])
+        log.info("Zmereno %s: %s LUFS, spicka %s dBTP",
+                 wav.name, measured["input_i"], measured["input_tp"])
+        return measured
+
+
+loudness = Loudness()
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("reproduktor")
 
@@ -104,8 +175,10 @@ class Player:
             raise FileNotFoundError(f"V adresari {sounds_dir} nejsou zadne .wav soubory")
         return random.choice(files)
 
-    def build_command(self, wav, volume):
+    def build_command(self, wav, volume, norm_filter=None):
         enc_args, pkt_size = codec_args(CONFIG["CODEC"])
+        filters = [norm_filter] if norm_filter else []
+        filters.append(f"volume={volume}")
         url = (f"rtp://{CONFIG['MULTICAST_ADDR']}:{CONFIG['MULTICAST_PORT']}"
                f"?ttl={CONFIG['TTL']}&pkt_size={pkt_size}")
         if CONFIG["LOCAL_ADDR"]:
@@ -116,19 +189,27 @@ class Player:
             "-re",                      # posilat v realnem case
             "-i", str(wav),
             "-vn",
-            "-af", f"volume={volume}",
+            "-af", ",".join(filters),
             "-ac", "1",                 # mono
             *enc_args,
             "-f", "rtp",
             url,
         ]
 
+    def is_playing(self):
+        with self._lock:
+            return self._proc is not None and self._proc.poll() is None
+
     def play(self, volume):
+        if self.is_playing():
+            return None
+        wav = self.pick_random_wav()
+        # Mereni muze par sekund trvat, proto mimo zamek (/status mezitim odpovida)
+        norm_filter = loudness.filter_for(wav) if CONFIG["NORMALIZE"] else None
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 return None
-            wav = self.pick_random_wav()
-            cmd = self.build_command(wav, volume)
+            cmd = self.build_command(wav, volume, norm_filter)
             log.info("Prehravam %s (hlasitost %s) -> %s:%s",
                      wav.name, volume, CONFIG["MULTICAST_ADDR"], CONFIG["MULTICAST_PORT"])
             # stdout s SDP nepotrebujeme
