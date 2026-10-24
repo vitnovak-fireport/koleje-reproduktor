@@ -1,5 +1,7 @@
 # Kojele – reproduktor
 
+> Privátní projekt pro obsluhu zahradní železnice u mě doma na zahradě.
+
 HTTP služba, která po zavolání `GET /play` vybere náhodný WAV soubor a pomocí
 ffmpeg ho pošle jako RTP multicast (výchozí kodek Opus) do reproduktoru **Grandstream GSC3518HS**.
 
