@@ -21,6 +21,7 @@ Nejde o SIP hovor – reproduktor jen poslouchá multicastovou adresu a stream o
 | Endpoint | Co dělá |
 |---|---|
 | `GET /play` | Přehraje náhodný `.wav` ze `SOUNDS_DIR`. Když už něco hraje, vrátí `409`. |
+| `GET /play?volume=-12dB` | Totéž s jinou hlasitostí než `VOLUME` (viz [Hlasitost](#hlasitost)). |
 | `GET /stop` | Zastaví přehrávání. |
 | `GET /status` | Vrátí `{"playing": true/false, "file": "..."}`. |
 
@@ -38,6 +39,7 @@ curl http://<ip-pi>:8080/play
 | `CODEC` | `OPUS` | `OPUS`, `G722`, `PCMU` nebo `PCMA` – viz [Kodeky](#kodeky) |
 | `OPUS_PAYLOAD_TYPE` | `123` | Musí sedět s „Opus Payload Type“ v reproduktoru |
 | `OPUS_BITRATE` | `64k` | Datový tok Opusu (mono) |
+| `VOLUME` | `1.0` | Výchozí hlasitost – násobek (`0.3`) nebo decibely (`-10dB`) |
 | `LOCAL_ADDR` | – | IP rozhraní, ze kterého multicast posílat (při více sítovkách) |
 | `TTL` | `4` | TTL multicastových paketů |
 | `HTTP_HOST` | `0.0.0.0` | Adresa HTTP serveru |
@@ -68,6 +70,32 @@ Rychlé přepnutí kodeku při ručním testu:
 
 ```bash
 podman run --rm --net=host -v ~/sounds:/sounds:ro,Z -e CODEC=G722 reproduktor
+```
+
+## Hlasitost
+
+Zvuk se ztlumí už při kódování filtrem ffmpeg `volume`, takže to funguje
+i když je reproduktor nastavený na minimum a pořád hraje moc nahlas.
+
+| Hodnota | Význam |
+|---|---|
+| `1.0` | beze změny |
+| `0.5` nebo `-6dB` | zhruba poloviční amplituda |
+| `0.25` nebo `-12dB` | výrazně tišší |
+| `0.1` nebo `-20dB` | hodně potichu |
+
+Výchozí hodnota se nastaví proměnnou `VOLUME` (v `reproduktor.container`),
+pro jedno přehrání ji lze přebít parametrem:
+
+```bash
+curl "http://<ip-pi>:8080/play?volume=-12dB"
+```
+
+Nejjednodušší je zkoušet různé `?volume=` a vybranou hodnotu pak zapsat do `VOLUME`.
+Po změně `reproduktor.container`:
+
+```bash
+cp reproduktor.container ~/.config/containers/systemd/ && systemctl --user daemon-reload && systemctl --user restart reproduktor
 ```
 
 ## Nastavení reproduktoru GSC3518HS
@@ -185,19 +213,19 @@ python3 reproduktor.py
 Opus:
 
 ```bash
-ffmpeg -re -i test.wav -vn -ac 1 -ar 48000 -acodec libopus -b:a 64k -application audio -frame_duration 20 -payload_type 123 -f rtp "rtp://239.1.1.1:5000?ttl=4&pkt_size=1300"
+ffmpeg -re -i test.wav -vn -af volume=-12dB -ac 1 -ar 48000 -acodec libopus -b:a 64k -application audio -frame_duration 20 -payload_type 123 -f rtp "rtp://239.1.1.1:5000?ttl=4&pkt_size=1300"
 ```
 
 G.722:
 
 ```bash
-ffmpeg -re -i test.wav -vn -ac 1 -ar 16000 -acodec g722 -payload_type 9 -f rtp "rtp://239.1.1.1:5000?ttl=4&pkt_size=172"
+ffmpeg -re -i test.wav -vn -af volume=-12dB -ac 1 -ar 16000 -acodec g722 -payload_type 9 -f rtp "rtp://239.1.1.1:5000?ttl=4&pkt_size=172"
 ```
 
 G.711 µ-law:
 
 ```bash
-ffmpeg -re -i test.wav -vn -ac 1 -ar 8000 -acodec pcm_mulaw -payload_type 0 -f rtp "rtp://239.1.1.1:5000?ttl=4&pkt_size=172"
+ffmpeg -re -i test.wav -vn -af volume=-12dB -ac 1 -ar 8000 -acodec pcm_mulaw -payload_type 0 -f rtp "rtp://239.1.1.1:5000?ttl=4&pkt_size=172"
 ```
 
 ## Když reproduktor nehraje

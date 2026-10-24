@@ -12,6 +12,7 @@ Pouziti:
     python reproduktor.py
     (nebo v kontejneru, viz Containerfile a reproduktor.container)
     curl http://localhost:8080/play
+    curl "http://localhost:8080/play?volume=-12dB"
     curl http://localhost:8080/status
     curl http://localhost:8080/stop
 
@@ -22,13 +23,14 @@ import json
 import logging
 import os
 import random
+import re
 import shutil
 import signal
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 CONFIG = {
     # Adresar s WAV soubory
@@ -45,6 +47,8 @@ CONFIG = {
     # Musi sedet s "Opus Payload Type" v reproduktoru (Account -> Codec Settings, vychozi 123)
     "OPUS_PAYLOAD_TYPE": int(os.environ.get("OPUS_PAYLOAD_TYPE", "123")),
     "OPUS_BITRATE": os.environ.get("OPUS_BITRATE", "64k"),
+    # Hlasitost pro ffmpeg filtr volume: nasobek (0.3) nebo decibely (-10dB)
+    "VOLUME": os.environ.get("VOLUME", "1.0"),
     "FFMPEG": os.environ.get("FFMPEG", "ffmpeg"),
     "HTTP_HOST": os.environ.get("HTTP_HOST", "0.0.0.0"),
     "HTTP_PORT": int(os.environ.get("HTTP_PORT", "8080")),
@@ -74,6 +78,13 @@ def codec_args(name):
 
 CODECS = ("OPUS", "G722", "PCMU", "PCMA")
 
+# Jen cislo nebo cislo s dB, aby se pres ?volume= nedal podstrcit jiny ffmpeg filtr
+VOLUME_RE = re.compile(r"^-?\d+(\.\d+)?(dB)?$")
+
+
+def valid_volume(value):
+    return bool(VOLUME_RE.match(value))
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("reproduktor")
 
@@ -93,7 +104,7 @@ class Player:
             raise FileNotFoundError(f"V adresari {sounds_dir} nejsou zadne .wav soubory")
         return random.choice(files)
 
-    def build_command(self, wav):
+    def build_command(self, wav, volume):
         enc_args, pkt_size = codec_args(CONFIG["CODEC"])
         url = (f"rtp://{CONFIG['MULTICAST_ADDR']}:{CONFIG['MULTICAST_PORT']}"
                f"?ttl={CONFIG['TTL']}&pkt_size={pkt_size}")
@@ -105,19 +116,21 @@ class Player:
             "-re",                      # posilat v realnem case
             "-i", str(wav),
             "-vn",
+            "-af", f"volume={volume}",
             "-ac", "1",                 # mono
             *enc_args,
             "-f", "rtp",
             url,
         ]
 
-    def play(self):
+    def play(self, volume):
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 return None
             wav = self.pick_random_wav()
-            cmd = self.build_command(wav)
-            log.info("Prehravam %s -> %s:%s", wav.name, CONFIG["MULTICAST_ADDR"], CONFIG["MULTICAST_PORT"])
+            cmd = self.build_command(wav, volume)
+            log.info("Prehravam %s (hlasitost %s) -> %s:%s",
+                     wav.name, volume, CONFIG["MULTICAST_ADDR"], CONFIG["MULTICAST_PORT"])
             # stdout s SDP nepotrebujeme
             self._proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
             self._current = wav.name
@@ -161,14 +174,19 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        path = urlparse(self.path).path.rstrip("/")
+        url = urlparse(self.path)
+        path = url.path.rstrip("/")
         try:
             if path == "/play":
-                name = player.play()
+                volume = parse_qs(url.query).get("volume", [CONFIG["VOLUME"]])[0]
+                if not valid_volume(volume):
+                    self._send(400, {"error": f"Neplatna hlasitost {volume!r}, pouzij napr. 0.3 nebo -10dB"})
+                    return
+                name = player.play(volume)
                 if name is None:
                     self._send(409, {"error": "Uz se neco prehrava", **player.status()})
                 else:
-                    self._send(200, {"playing": True, "file": name})
+                    self._send(200, {"playing": True, "file": name, "volume": volume})
             elif path == "/stop":
                 name = player.stop()
                 self._send(200, {"stopped": name})
@@ -189,6 +207,8 @@ class Handler(BaseHTTPRequestHandler):
 def main():
     if CONFIG["CODEC"] not in CODECS:
         raise SystemExit(f"Nepodporovany CODEC {CONFIG['CODEC']}, pouzij {', '.join(CODECS)}")
+    if not valid_volume(CONFIG["VOLUME"]):
+        raise SystemExit(f"Neplatna VOLUME {CONFIG['VOLUME']!r}, pouzij napr. 0.3 nebo -10dB")
     if shutil.which(CONFIG["FFMPEG"]) is None:
         raise SystemExit(f"ffmpeg nenalezen ({CONFIG['FFMPEG']}), nastav promennou FFMPEG nebo ho pridej do PATH")
     Path(CONFIG["SOUNDS_DIR"]).mkdir(parents=True, exist_ok=True)
