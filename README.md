@@ -39,7 +39,7 @@ curl http://<ip-pi>:8080/play
 | `CODEC` | `OPUS` | `OPUS`, `G722`, `PCMU` nebo `PCMA` – viz [Kodeky](#kodeky) |
 | `OPUS_PAYLOAD_TYPE` | `123` | Musí sedět s „Opus Payload Type“ v reproduktoru |
 | `OPUS_BITRATE` | `64k` | Datový tok Opusu (mono) |
-| `VOLUME` | `1.0` | Výchozí hlasitost – násobek (`0.3`) nebo decibely (`-10dB`) |
+| `VOLUME` | `0.1` | Výchozí hlasitost – násobek (`0.3`) nebo decibely (`-10dB`) |
 | `NORMALIZE` | `1` | Normalizace hlasitosti všech souborů (`0` = vypnuto) |
 | `LOUDNESS` | `-16` | Cílová hlasitost normalizace v LUFS |
 | `TRUE_PEAK` | `-1.5` | Maximální špička po normalizaci v dBTP |

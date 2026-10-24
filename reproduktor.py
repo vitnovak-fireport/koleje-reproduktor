@@ -48,7 +48,7 @@ CONFIG = {
     "OPUS_PAYLOAD_TYPE": int(os.environ.get("OPUS_PAYLOAD_TYPE", "123")),
     "OPUS_BITRATE": os.environ.get("OPUS_BITRATE", "64k"),
     # Hlasitost pro ffmpeg filtr volume: nasobek (0.3) nebo decibely (-10dB)
-    "VOLUME": os.environ.get("VOLUME", "1.0"),
+    "VOLUME": os.environ.get("VOLUME", "0.1"),
     # Normalizace hlasitosti (EBU R128 loudnorm), aby vsechny soubory hraly stejne nahlas.
     # VOLUME se aplikuje az po normalizaci.
     "NORMALIZE": os.environ.get("NORMALIZE", "1").lower() in ("1", "true", "yes", "on"),
