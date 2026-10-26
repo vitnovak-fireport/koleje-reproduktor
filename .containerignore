@@ -1,0 +1,5 @@
+.venv
+.idea
+sounds
+__pycache__
+*.pyc

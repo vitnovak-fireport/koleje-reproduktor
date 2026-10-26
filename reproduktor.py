@@ -13,6 +13,7 @@ Pouziti:
     (nebo v kontejneru, viz Containerfile a reproduktor.container)
     curl http://localhost:8080/play
     curl "http://localhost:8080/play?volume=-12dB"
+    curl "http://localhost:8080/announce?file=zastavime"
     curl http://localhost:8080/status
     curl http://localhost:8080/stop
 
@@ -35,6 +36,8 @@ from urllib.parse import parse_qs, urlparse
 CONFIG = {
     # Adresar s WAV soubory
     "SOUNDS_DIR": os.environ.get("SOUNDS_DIR", str(Path(__file__).parent / "sounds")),
+    # Adresar s konkretnimi hlaskami pro /announce?file=
+    "SPECIFIC_SOUNDS_DIR": os.environ.get("SPECIFIC_SOUNDS_DIR", str(Path(__file__).parent / "sounds-specific")),
     # Multicast adresa a port, na ktere posloucha GSC3518HS
     "MULTICAST_ADDR": os.environ.get("MULTICAST_ADDR", "239.1.1.1"),
     "MULTICAST_PORT": int(os.environ.get("MULTICAST_PORT", "5000")),
@@ -175,6 +178,19 @@ class Player:
             raise FileNotFoundError(f"V adresari {sounds_dir} nejsou zadne .wav soubory")
         return random.choice(files)
 
+    def find_specific_wav(self, name):
+        """Najde hlasku podle nazvu (s priponou .wav i bez). Hleda se jen mezi soubory
+        v adresari, takze pres nazev nejde sahnout mimo nej."""
+        sounds_dir = Path(CONFIG["SPECIFIC_SOUNDS_DIR"])
+        wanted = name.lower()
+        if not wanted.endswith(".wav"):
+            wanted += ".wav"
+        if sounds_dir.is_dir():
+            for p in sounds_dir.iterdir():
+                if p.is_file() and p.name.lower() == wanted:
+                    return p
+        raise FileNotFoundError(f"Hlaska {name!r} v adresari {sounds_dir} neexistuje")
+
     def build_command(self, wav, volume, norm_filter=None):
         enc_args, pkt_size = codec_args(CONFIG["CODEC"])
         filters = [norm_filter] if norm_filter else []
@@ -200,15 +216,21 @@ class Player:
         with self._lock:
             return self._proc is not None and self._proc.poll() is None
 
-    def play(self, volume):
-        if self.is_playing():
+    def play(self, volume, wav=None, preempt=False):
+        """Bez wav vybere nahodny soubor. Kdyz uz neco hraje, vrati None,
+        s preempt=True puvodni prehravani zastavi a pusti wav."""
+        if not preempt and self.is_playing():
             return None
-        wav = self.pick_random_wav()
+        if wav is None:
+            wav = self.pick_random_wav()
         # Mereni muze par sekund trvat, proto mimo zamek (/status mezitim odpovida)
         norm_filter = loudness.filter_for(wav) if CONFIG["NORMALIZE"] else None
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
-                return None
+                if not preempt:
+                    return None
+                log.info("Prerusuji %s kvuli %s", self._current, wav.name)
+                self._terminate(self._proc)
             cmd = self.build_command(wav, volume, norm_filter)
             log.info("Prehravam %s (hlasitost %s) -> %s:%s",
                      wav.name, volume, CONFIG["MULTICAST_ADDR"], CONFIG["MULTICAST_PORT"])
@@ -228,6 +250,16 @@ class Player:
             if self._proc is proc:
                 self._proc = None
                 self._current = None
+
+    @staticmethod
+    def _terminate(proc):
+        # Pockat na konec, aby se do multicastu nemichaly dva streamy
+        proc.terminate()
+        try:
+            proc.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
 
     def stop(self):
         with self._lock:
@@ -273,8 +305,25 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, {"stopped": name})
             elif path == "/status":
                 self._send(200, player.status())
+            elif path == "/announce":
+                query = parse_qs(url.query)
+                name = query.get("file", [""])[0]
+                volume = query.get("volume", [CONFIG["VOLUME"]])[0]
+                if not name:
+                    self._send(400, {"error": "Chybi parametr file, napr. /announce?file=zastavime"})
+                    return
+                if not valid_volume(volume):
+                    self._send(400, {"error": f"Neplatna hlasitost {volume!r}, pouzij napr. 0.3 nebo -10dB"})
+                    return
+                try:
+                    wav = player.find_specific_wav(name)
+                except FileNotFoundError as e:
+                    self._send(404, {"error": str(e)})
+                    return
+                player.play(volume, wav=wav, preempt=True)
+                self._send(200, {"playing": True, "file": wav.name, "volume": volume})
             else:
-                self._send(404, {"error": "Nenalezeno", "endpoints": ["/play", "/stop", "/status"]})
+                self._send(404, {"error": "Nenalezeno", "endpoints": ["/play", "/announce", "/stop", "/status"]})
         except FileNotFoundError as e:
             self._send(500, {"error": str(e)})
         except Exception as e:

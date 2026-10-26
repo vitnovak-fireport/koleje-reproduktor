@@ -22,6 +22,7 @@ Nejde o SIP hovor – reproduktor jen poslouchá multicastovou adresu a stream o
 |---|---|
 | `GET /play` | Přehraje náhodný `.wav` ze `SOUNDS_DIR`. Když už něco hraje, vrátí `409`. |
 | `GET /play?volume=-12dB` | Totéž s jinou hlasitostí než `VOLUME` (viz [Hlasitost](#hlasitost)). |
+| `GET /announce?file=zastavime` | Přehraje konkrétní hlášku ze `SPECIFIC_SOUNDS_DIR` (přípona `.wav` je nepovinná). Když už něco hraje, přeruší to. Bere i `volume=`. Neexistující soubor = `404`. |
 | `GET /stop` | Zastaví přehrávání. |
 | `GET /status` | Vrátí `{"playing": true/false, "file": "..."}`. |
 
@@ -29,11 +30,16 @@ Nejde o SIP hovor – reproduktor jen poslouchá multicastovou adresu a stream o
 curl http://<ip-pi>:8080/play
 ```
 
+```bash
+curl "http://<ip-pi>:8080/announce?file=zastavka-na-znameni"
+```
+
 ## Konfigurace (proměnné prostředí)
 
 | Proměnná | Výchozí | Popis |
 |---|---|---|
 | `SOUNDS_DIR` | `./sounds` (v kontejneru `/sounds`) | Adresář s WAV soubory |
+| `SPECIFIC_SOUNDS_DIR` | `./sounds-specific` (v kontejneru `/app/sounds-specific`) | Adresář s konkrétními hláškami pro `/announce` – je součástí repozitáře i obrazu |
 | `MULTICAST_ADDR` | `239.1.1.1` | Multicast adresa nastavená v reproduktoru |
 | `MULTICAST_PORT` | `5000` | Port nastavený v reproduktoru |
 | `CODEC` | `OPUS` | `OPUS`, `G722`, `PCMU` nebo `PCMA` – viz [Kodeky](#kodeky) |

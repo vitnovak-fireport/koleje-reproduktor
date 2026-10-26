@@ -19,9 +19,10 @@ RUN useradd --system --no-create-home --shell /usr/sbin/nologin reproduktor
 
 WORKDIR /app
 COPY reproduktor.py .
+COPY sounds-specific/ ./sounds-specific/
 
 ENV PYTHONUNBUFFERED=1 \
-    SOUNDS_DIR=/sounds \
+    SOUNDS_DIR=/sounds     SPECIFIC_SOUNDS_DIR=/app/sounds-specific \
     HTTP_PORT=8080
 
 USER reproduktor

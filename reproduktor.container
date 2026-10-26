@@ -1,0 +1,41 @@
+# Podman Quadlet – automaticke spousteni pres systemd.
+#
+# Rootless instalace (uzivatel pi):
+#   mkdir -p ~/.config/containers/systemd
+#   cp reproduktor.container ~/.config/containers/systemd/
+#   systemctl --user daemon-reload
+#   systemctl --user start reproduktor
+#   sudo loginctl enable-linger pi     # aby bezel i bez prihlaseni
+#
+# Logy: journalctl --user -u reproduktor -f
+
+[Unit]
+Description=Multicast prehravac pro GSC3518HS
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image=localhost/reproduktor:latest
+ContainerName=reproduktor
+Network=host
+Volume=%h/sounds:/sounds:ro,Z
+Environment=MULTICAST_ADDR=239.1.1.1
+Environment=MULTICAST_PORT=5000
+# OPUS (nejlepsi) -> G722 -> PCMU, kdyby reproduktor dany kodek neprehral
+Environment=CODEC=OPUS
+Environment=OPUS_PAYLOAD_TYPE=123
+Environment=OPUS_BITRATE=64k
+Environment=HTTP_PORT=8080
+# Vychozi hlasitost: nasobek (0.3) nebo decibely (-10dB), jde prebit pres /play?volume=
+Environment=VOLUME=0.1
+# Normalizace hlasitosti vsech souboru na LOUDNESS (LUFS), VOLUME se aplikuje az potom
+Environment=NORMALIZE=1
+Environment=LOUDNESS=-16
+# IP adresa Pi v siti reproduktoru (pri vice rozhranich)
+#Environment=LOCAL_ADDR=192.168.1.50
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target
