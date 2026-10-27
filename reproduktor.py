@@ -59,6 +59,9 @@ CONFIG = {
     "LOUDNESS": float(os.environ.get("LOUDNESS", "-16")),
     # Maximalni spicka (true peak) v dBTP
     "TRUE_PEAK": float(os.environ.get("TRUE_PEAK", "-1.5")),
+    # Ticho pred zacatkem kazdeho souboru v ms. Reproduktoru chvili trva, nez se
+    # na novy stream chyti, a bez nej by kratke hlasky spolkl cele.
+    "LEAD_IN_MS": int(os.environ.get("LEAD_IN_MS", "1000")),
     "FFMPEG": os.environ.get("FFMPEG", "ffmpeg"),
     "HTTP_HOST": os.environ.get("HTTP_HOST", "0.0.0.0"),
     "HTTP_PORT": int(os.environ.get("HTTP_PORT", "8080")),
@@ -195,6 +198,8 @@ class Player:
         enc_args, pkt_size = codec_args(CONFIG["CODEC"])
         filters = [norm_filter] if norm_filter else []
         filters.append(f"volume={volume}")
+        if CONFIG["LEAD_IN_MS"] > 0:
+            filters.append(f"adelay={CONFIG['LEAD_IN_MS']}:all=1")
         url = (f"rtp://{CONFIG['MULTICAST_ADDR']}:{CONFIG['MULTICAST_PORT']}"
                f"?ttl={CONFIG['TTL']}&pkt_size={pkt_size}")
         if CONFIG["LOCAL_ADDR"]:
