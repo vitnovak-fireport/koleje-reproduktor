@@ -62,7 +62,7 @@ CONFIG = {
     # Uvod pred kazdym souborem v ms. Reproduktor zapina zesilovac az kdyz prijde
     # zvuk (digitalni ticho ho nevzbudi) a to chvili trva, proto se do uvodu
     # posila velmi tichy ruzovy sum. 0 = bez uvodu.
-    "LEAD_IN_MS": int(os.environ.get("LEAD_IN_MS", "1000")),
+    "LEAD_IN_MS": int(os.environ.get("LEAD_IN_MS", "1500")),
     # Uroven sumu v uvodu v dBFS (nezavisla na VOLUME)
     "LEAD_IN_NOISE_DB": float(os.environ.get("LEAD_IN_NOISE_DB", "-60")),
     "FFMPEG": os.environ.get("FFMPEG", "ffmpeg"),
