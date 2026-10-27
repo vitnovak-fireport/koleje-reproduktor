@@ -59,9 +59,12 @@ CONFIG = {
     "LOUDNESS": float(os.environ.get("LOUDNESS", "-16")),
     # Maximalni spicka (true peak) v dBTP
     "TRUE_PEAK": float(os.environ.get("TRUE_PEAK", "-1.5")),
-    # Ticho pred zacatkem kazdeho souboru v ms. Reproduktoru chvili trva, nez se
-    # na novy stream chyti, a bez nej by kratke hlasky spolkl cele.
+    # Uvod pred kazdym souborem v ms. Reproduktor zapina zesilovac az kdyz prijde
+    # zvuk (digitalni ticho ho nevzbudi) a to chvili trva, proto se do uvodu
+    # posila velmi tichy ruzovy sum. 0 = bez uvodu.
     "LEAD_IN_MS": int(os.environ.get("LEAD_IN_MS", "1000")),
+    # Uroven sumu v uvodu v dBFS (nezavisla na VOLUME)
+    "LEAD_IN_NOISE_DB": float(os.environ.get("LEAD_IN_NOISE_DB", "-60")),
     "FFMPEG": os.environ.get("FFMPEG", "ffmpeg"),
     "HTTP_HOST": os.environ.get("HTTP_HOST", "0.0.0.0"),
     "HTTP_PORT": int(os.environ.get("HTTP_PORT", "8080")),
@@ -198,19 +201,29 @@ class Player:
         enc_args, pkt_size = codec_args(CONFIG["CODEC"])
         filters = [norm_filter] if norm_filter else []
         filters.append(f"volume={volume}")
-        if CONFIG["LEAD_IN_MS"] > 0:
-            filters.append(f"adelay={CONFIG['LEAD_IN_MS']}:all=1")
         url = (f"rtp://{CONFIG['MULTICAST_ADDR']}:{CONFIG['MULTICAST_PORT']}"
                f"?ttl={CONFIG['TTL']}&pkt_size={pkt_size}")
         if CONFIG["LOCAL_ADDR"]:
             url += f"&localaddr={CONFIG['LOCAL_ADDR']}"
+        cmd = [CONFIG["FFMPEG"], "-hide_banner", "-loglevel", "error"]
+        if CONFIG["LEAD_IN_MS"] > 0:
+            # Sum a soubor se spoji pres concat. Misto -re (to by brzdilo jen cteni
+            # souboru, sum by odesel naraz) se do realneho casu brzdi az vystup (arealtime).
+            amplitude = 10 ** (CONFIG["LEAD_IN_NOISE_DB"] / 20)
+            fmt = "aresample=48000,aformat=sample_fmts=fltp:channel_layouts=mono"
+            graph = (f"anoisesrc=d={CONFIG['LEAD_IN_MS'] / 1000}:c=pink:a={amplitude:.6f}:r=48000,{fmt}[noise];"
+                     f"[0:a]{','.join(filters)},{fmt}[main];"
+                     f"[noise][main]concat=n=2:v=0:a=1,arealtime[out]")
+            cmd += ["-i", str(wav), "-filter_complex", graph, "-map", "[out]"]
+        else:
+            cmd += [
+                "-re",                  # posilat v realnem case
+                "-i", str(wav),
+                "-vn",
+                "-af", ",".join(filters),
+            ]
         return [
-            CONFIG["FFMPEG"],
-            "-hide_banner", "-loglevel", "error",
-            "-re",                      # posilat v realnem case
-            "-i", str(wav),
-            "-vn",
-            "-af", ",".join(filters),
+            *cmd,
             "-ac", "1",                 # mono
             *enc_args,
             "-f", "rtp",

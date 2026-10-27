@@ -49,7 +49,8 @@ curl "http://<ip-pi>:8080/announce?file=zastavka-na-znameni"
 | `NORMALIZE` | `1` | Normalizace hlasitosti všech souborů (`0` = vypnuto) |
 | `LOUDNESS` | `-16` | Cílová hlasitost normalizace v LUFS |
 | `TRUE_PEAK` | `-1.5` | Maximální špička po normalizaci v dBTP |
-| `LEAD_IN_MS` | `1000` | Ticho před začátkem každého souboru v ms, aby reproduktor stihl chytit stream a neusekl začátek (`0` = vypnuto) |
+| `LEAD_IN_MS` | `1000` | Úvod před každým souborem v ms s velmi tichým šumem – reproduktor zapíná zesilovač až když přijde zvuk (digitální ticho ho nevzbudí), takže bez úvodu usekne začátek (`0` = vypnuto) |
+| `LEAD_IN_NOISE_DB` | `-60` | Úroveň šumu v úvodu v dBFS, nezávislá na `VOLUME`. Když se začátek pořád usekává, zvýšit (např. `-50`) |
 | `LOCAL_ADDR` | – | IP rozhraní, ze kterého multicast posílat (při více sítovkách) |
 | `TTL` | `4` | TTL multicastových paketů |
 | `HTTP_HOST` | `0.0.0.0` | Adresa HTTP serveru |

@@ -31,8 +31,10 @@ Environment=VOLUME=0.1
 # Normalizace hlasitosti vsech souboru na LOUDNESS (LUFS), VOLUME se aplikuje az potom
 Environment=NORMALIZE=1
 Environment=LOUDNESS=-16
-# Ticho pred kazdym souborem (ms), aby reproduktor neusekl zacatek kratkych hlasek
+# Uvod s tichym sumem pred kazdym souborem (ms), aby se stihl vzbudit zesilovac
 Environment=LEAD_IN_MS=1000
+# Uroven sumu v uvodu (dBFS), kdyz se zacatek porad usekava, zvysit
+Environment=LEAD_IN_NOISE_DB=-60
 # IP adresa Pi v siti reproduktoru (pri vice rozhranich)
 #Environment=LOCAL_ADDR=192.168.1.50
 
